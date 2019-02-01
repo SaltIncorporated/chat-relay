@@ -2,24 +2,74 @@
 
 from ast import literal_eval
 from fbchat import Client as ClientFB, ThreadType
-from fbchat.models import Message as MessageFB
+from fbchat.models import \
+                   Message as MessageFB, \
+                Attachment as AttachmentFB, \
+           AudioAttachment as AudioAttachmentFB, \
+            FileAttachment as FileAttachmentFB, \
+           ImageAttachment as ImageAttachmentFB, \
+    LiveLocationAttachment as LiveLocationAttachmentFB, \
+        LocationAttachment as LocationAttachmentFB, \
+           ShareAttachment as ShareAttachmentFB, \
+           VideoAttachment as VideoAttachmentFB, \
+       FBchatFacebookError
 from sleekxmpp import ClientXMPP
 from sleekxmpp.exceptions import IqError, IqTimeout
 from queue import Queue
 from threading import Thread
+from urllib.request import urlretrieve
+import time
 import logging
 
 import config
+import xmpp_plugins.xep_0363 as xep_0363
 
 """
 Models
 """
-class Message():
+class Attachment():
+
+    def __init__(self, url):
+        self.url = url
+
+
+class AudioAttachment(Attachment):
+
     pass
 
-class TextMessage():
+
+class FileAttachment(Attachment):
+
+    pass
+
+
+class ImageAttachment(Attachment):
+
+    pass
+
+
+class VideoAttachment(Attachment):
+
+    pass
+
+
+class Message():
+
+    pass
+
+
+class TextMessage(Message):
+
     def __init__(self, user, text):
-        self.text = '<' + user + '> ' + text
+        self.user = user
+        self.text = text
+
+
+class AttachmentMessage(Message):
+
+    def __init__(self, user, attachments):
+        self.user = user
+        self.attachments = attachments
 
 
 """
@@ -56,8 +106,9 @@ class XMPPClient(Client):
         self.client.register_plugin('xep_0030') # Service Discovery
         self.client.register_plugin('xep_0045') # Multi-User Chat
         self.client.register_plugin('xep_0199') # XMPP Ping
-        self.client.add_event_handler("session_start", self.session_start)
-        self.client.add_event_handler("groupchat_message", self.muc_message)
+        self.client.register_plugin('xep_0363', module=xep_0363) # HTTP File Upload
+        self.client.add_event_handler('session_start', self.session_start)
+        self.client.add_event_handler('groupchat_message', self.muc_message)
         self.client.connect()
 
     def session_start(self, event):
@@ -74,7 +125,17 @@ class XMPPClient(Client):
 
     def send(self, msg, room):
         if type(msg) is TextMessage:
-            self.client.send_message(mto=room, mbody=msg.text, mtype='groupchat')
+            self.client.send_message(mto=room, mbody=f'<{msg.user}> {msg.text}', mtype='groupchat')
+        elif type(msg) is AttachmentMessage:
+            self.client.send_message(mto=room, mbody=f'{msg.user} sent:', mtype='groupchat')
+            for a in msg.attachments:
+                if type(a) is ImageAttachment:
+                    name = '/tmp/' + a.url.split('?', 1)[0].rsplit('/')[-1]
+                    urlretrieve(a.url, name)
+                    url = self.client['xep_0363'].upload_file(name)
+                else:
+                    url = a.url
+                self.client.send_message(mto=room, mbody=url, mtype='groupchat')
 
     def listen(self):
         self.client.process(block=False)
@@ -109,13 +170,45 @@ class FBChatClient(Client):
             room = self.rooms[thread_id]
             if author_id != self.client.uid:
                 name = self.get_author_name(message_object.author)
-                m = TextMessage(name, message_object.text)
-                room.receive(m)
+                if message_object.text != None:
+                    m = TextMessage(name, message_object.text)
+                    room.receive(m)
+                if len(message_object.attachments) > 0:
+                    atts = []
+                    for a in message_object.attachments:
+                        if type(a) is AudioAttachmentFB:
+                            atts.append(AudioAttachment(a.url))
+                        elif type(a) is FileAttachmentFB:
+                            atts.append(FileAttachment(a.url))
+                        elif type(a) is LocationAttachmentFB:
+                            atts.append(Attachment(a.url))
+                        elif type(a) is ImageAttachmentFB:
+                            while True:
+                                try:
+                                    atts.append(ImageAttachment(self.client.fetchImageUrl(a.uid)))
+                                    break
+                                except FBchatFacebookError as e:
+                                    #if e.fb_error_code == '1357031':
+                                    #     # Facebook is being retarded. Try again
+                                    #    time.sleep(100)
+                                    #else:
+                                    #    raise
+                                    raise
+                        elif type(a) is LiveLocationAttachmentFB:
+                            atts.append(Attachment('LiveLocationAttachmentFB (no url)'))
+                        elif type(a) is ShareAttachmentFB:
+                            atts.append(Attachment(a.original_url))
+                        elif type(a) is VideoAttachmentFB:
+                            atts.append(VideoAttachment(a.preview_url))
+                    m = AttachmentMessage(name, atts)
+                    room.receive(m)
 
     def send(self, msg, uid):
         if type(msg) is TextMessage:
-            m = MessageFB(text=msg.text)
-            self.client.send(m, thread_id=uid, thread_type=ThreadType.GROUP)
+            m = MessageFB(text=f'<{msg.user}> {msg.text}')
+        elif type(msg) is AttachmentMessage:
+            m = MessageFB(attachments=[a.url for a in msg.attachments])
+        self.client.send(m, thread_id=uid, thread_type=ThreadType.GROUP)
 
     def listen(self):
         Thread(target=self.client.listen, daemon=True).start()
@@ -132,7 +225,7 @@ class XMPPRoom(Room):
         self.room   = room
         self.nick   = nick
         client.rooms[room] = self
-        client.client.plugin['xep_0045'].joinMUC(room, nick)
+        client.client['xep_0045'].joinMUC(room, nick)
 
     def send(self, msg):
         self.client.send(msg, self.room)
