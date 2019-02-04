@@ -201,11 +201,11 @@ class FBChatClient(Client):
                                     atts.append(ImageAttachment(self.client.fetchImageUrl(a.uid)))
                                     break
                                 except FBchatFacebookError as e:
-                                    #if e.fb_error_code == '1357031':
-                                    #     # Facebook is being retarded. Try again
-                                    #    time.sleep(100)
-                                    #else:
-                                    #    raise
+                                    if e.fb_error_code == '1357031':
+                                         # Facebook is being retarded. Try again
+                                        time.sleep(100)
+                                    else:
+                                        raise
                                     raise
                         elif type(a) is LiveLocationAttachmentFB:
                             atts.append(Attachment('LiveLocationAttachmentFB (no url)'))
