@@ -105,7 +105,10 @@ class XMPPClient(Client):
         self.client = ClientXMPP(jid, password)
         self.client.register_plugin('xep_0030') # Service Discovery
         self.client.register_plugin('xep_0045') # Multi-User Chat
+        #self.client.register_plugin('xep_0047') # In-Band Bytestreams
+        self.client.register_plugin('xep_0066') # Out of Band Data
         self.client.register_plugin('xep_0199') # XMPP Ping
+        #self.client.register_plugin('xep_0231') # Bits of Binary
         self.client.register_plugin('xep_0363', module=xep_0363) # HTTP File Upload
         self.client.add_event_handler('session_start', self.session_start)
         self.client.add_event_handler('groupchat_message', self.muc_message)
@@ -120,7 +123,13 @@ class XMPPClient(Client):
         if room in self.rooms:
             room = self.rooms[room]
             if msg['mucnick'] != room.nick:
-                m = TextMessage(msg['mucnick'], msg['body'])
+                oob  = msg['oob']
+                url  = oob['url'] if oob else None
+                nick = msg['mucnick']
+                if url:
+                    m = AttachmentMessage(nick, [Attachment(url)])
+                if url != msg['body']:
+                    m = TextMessage(nick, msg['body'])
                 room.receive(m)
 
     def send(self, msg, room):
@@ -133,9 +142,13 @@ class XMPPClient(Client):
                     name = '/tmp/' + a.url.split('?', 1)[0].rsplit('/')[-1]
                     urlretrieve(a.url, name)
                     url = self.client['xep_0363'].upload_file(name)
+                    #self.client['xep_0066'].send_oob(to=room, url=url, block=True)
+                    m = self.client.make_message(mto=room, mbody=url, mtype='groupchat')
+                    m['oob']['url'] = url
+                    m.send()
                 else:
                     url = a.url
-                self.client.send_message(mto=room, mbody=url, mtype='groupchat')
+                    self.client.send_message(mto=room, mbody=url, mtype='groupchat')
 
     def listen(self):
         self.client.process(block=False)
@@ -206,9 +219,11 @@ class FBChatClient(Client):
     def send(self, msg, uid):
         if type(msg) is TextMessage:
             m = MessageFB(text=f'<{msg.user}> {msg.text}')
+            self.client.send(m, thread_id=uid, thread_type=ThreadType.GROUP)
         elif type(msg) is AttachmentMessage:
-            m = MessageFB(attachments=[a.url for a in msg.attachments])
-        self.client.send(m, thread_id=uid, thread_type=ThreadType.GROUP)
+            self.client.sendRemoteFiles([a.url for a in msg.attachments],
+                                        message=MessageFB(text=f'{msg.user} sent:'),
+                                        thread_id=uid, thread_type=ThreadType.GROUP)
 
     def listen(self):
         Thread(target=self.client.listen, daemon=True).start()
@@ -256,8 +271,8 @@ def create_relay(r1, r2):
 Main
 """
 if __name__ == '__main__':
-    #logging.basicConfig(level=logging.ERROR,
-    #                    format='%(levelname)-8s %(message)s')
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(levelname)-8s %(message)s')
 
     clients = {}
     rooms   = {}
