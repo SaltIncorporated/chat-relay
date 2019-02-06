@@ -119,6 +119,7 @@ class XMPPClient(Client):
                 name = '/tmp/' + a.url.split('?', 1)[0].rsplit('/')[-1]
                 urlretrieve(a.url, name)
                 url = self.client['xep_0363'].upload_file(name)
+                os.remove(name)
                 #self.client['xep_0066'].send_oob(to=room, url=url, block=True)
                 m = self.client.make_message(mto=room, mbody=url, mtype='groupchat')
                 m['oob']['url'] = url

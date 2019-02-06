@@ -98,7 +98,6 @@ class XEP_0363(BasePlugin):
                 'Content-Type': mime[0],
                 'Content-Length': str(os.path.getsize(path)),
             }, method='PUT')
-        os.remove(path)
         response = urlopen(request)
         if response.getcode() != 201:
             raise XMPPError(response.getcode())
