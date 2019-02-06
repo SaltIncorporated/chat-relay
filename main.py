@@ -33,26 +33,6 @@ class Attachment():
         self.url = url
 
 
-class AudioAttachment(Attachment):
-
-    pass
-
-
-class FileAttachment(Attachment):
-
-    pass
-
-
-class ImageAttachment(Attachment):
-
-    pass
-
-
-class VideoAttachment(Attachment):
-
-    pass
-
-
 class Message():
 
     pass
@@ -105,10 +85,8 @@ class XMPPClient(Client):
         self.client = ClientXMPP(jid, password)
         self.client.register_plugin('xep_0030') # Service Discovery
         self.client.register_plugin('xep_0045') # Multi-User Chat
-        #self.client.register_plugin('xep_0047') # In-Band Bytestreams
         self.client.register_plugin('xep_0066') # Out of Band Data
         self.client.register_plugin('xep_0199') # XMPP Ping
-        #self.client.register_plugin('xep_0231') # Bits of Binary
         self.client.register_plugin('xep_0363', module=xep_0363) # HTTP File Upload
         self.client.add_event_handler('session_start', self.session_start)
         self.client.add_event_handler('groupchat_message', self.muc_message)
@@ -138,17 +116,13 @@ class XMPPClient(Client):
         elif type(msg) is AttachmentMessage:
             self.client.send_message(mto=room, mbody=f'{msg.user} sent:', mtype='groupchat')
             for a in msg.attachments:
-                if type(a) is ImageAttachment:
-                    name = '/tmp/' + a.url.split('?', 1)[0].rsplit('/')[-1]
-                    urlretrieve(a.url, name)
-                    url = self.client['xep_0363'].upload_file(name)
-                    #self.client['xep_0066'].send_oob(to=room, url=url, block=True)
-                    m = self.client.make_message(mto=room, mbody=url, mtype='groupchat')
-                    m['oob']['url'] = url
-                    m.send()
-                else:
-                    url = a.url
-                    self.client.send_message(mto=room, mbody=url, mtype='groupchat')
+                name = '/tmp/' + a.url.split('?', 1)[0].rsplit('/')[-1]
+                urlretrieve(a.url, name)
+                url = self.client['xep_0363'].upload_file(name)
+                #self.client['xep_0066'].send_oob(to=room, url=url, block=True)
+                m = self.client.make_message(mto=room, mbody=url, mtype='groupchat')
+                m['oob']['url'] = url
+                m.send()
 
     def listen(self):
         self.client.process(block=False)
@@ -189,30 +163,29 @@ class FBChatClient(Client):
                 if len(message_object.attachments) > 0:
                     atts = []
                     for a in message_object.attachments:
-                        if type(a) is AudioAttachmentFB:
-                            atts.append(AudioAttachment(a.url))
-                        elif type(a) is FileAttachmentFB:
-                            atts.append(FileAttachment(a.url))
-                        elif type(a) is LocationAttachmentFB:
+                        if type(a) is AudioAttachmentFB   \
+                        or type(a) is FileAttachmentFB    \
+                        or type(a) is LocationAttachmentFB:
                             atts.append(Attachment(a.url))
                         elif type(a) is ImageAttachmentFB:
                             while True:
                                 try:
-                                    atts.append(ImageAttachment(self.client.fetchImageUrl(a.uid)))
+                                    atts.append(Attachment(self.client.fetchImageUrl(a.uid)))
                                     break
                                 except FBchatFacebookError as e:
-                                    #if e.fb_error_code == '1357031':
-                                    #     # Facebook is being retarded. Try again
-                                    #    time.sleep(100)
-                                    #else:
-                                    #    raise
+                                    if e.fb_error_code == '1357031':
+                                        # Facebook is being retarded. Try again
+                                        time.sleep(100)
+                                    else:
+                                        raise
                                     raise
-                        elif type(a) is LiveLocationAttachmentFB:
-                            atts.append(Attachment('LiveLocationAttachmentFB (no url)'))
-                        elif type(a) is ShareAttachmentFB:
-                            atts.append(Attachment(a.original_url))
                         elif type(a) is VideoAttachmentFB:
-                            atts.append(VideoAttachment(a.preview_url))
+                            atts.append(Attachment(a.preview_url))
+                        elif type(a) is ShareAttachmentFB: # Really necessary though?
+                            pass
+                            #atts.append(Attachment(a.original_image_url))
+                        elif type(a) is LiveLocationAttachmentFB:
+                            pass # TODO
                     m = AttachmentMessage(name, atts)
                     room.receive(m)
 
